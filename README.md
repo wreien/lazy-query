@@ -18,7 +18,7 @@ For example:
     $ clang++ -std=c++17 -Wall -Wextra expr_template.cpp -o expr_template
     $ ./expr_template
 
-I've noted that the error messages when the DSL is misused
+I've noticed that the error messages when the DSL is misused
 are currently a little better with Clang than GCC,
 since Clang respects the `static_assert`s more.
 
@@ -41,14 +41,15 @@ This allows successive filters to be chained with only a small performance impac
 The DSL is a basic query language.
 Information from a record is extracted using one of the provided free functions,
 and this information can be composed using most standard C++ operators.
-The final result of the query must be implicitly convertible to `bool`:
+The final result of the query must be convertible to `bool`:
 this is used to determine if the record should be filtered out.
 
 Due to the dynamic nature of the records, the DSL requires type information.
-Lots of the time the language will infer type from context; for example, in
-`db::get("a") == 5` the query will check if `a` is an `int` equal to `5`.
+Much of the time the language can infer the type from context;
+for example, in `db::get("a") == 5`
+the query will check if `a` is an `int` equal to `5`.
 However, this is not always possible, and occasionally it gets it wrong.
-In this case you can supply an explicit type, `db::get<int>("a")`.
+If this is the case you can supply an explicit type, such as `db::get<int>("a")`.
 
 ## Query Operations
 
@@ -80,5 +81,5 @@ This list may be expanded in time.
 
 ## Examples
 
-The included `main` function has a few examples
-showing off the features of the DSL.
+The included `example.cpp` file demonstrates
+a number of the DSL's features.
