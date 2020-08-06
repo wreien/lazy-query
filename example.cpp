@@ -29,14 +29,13 @@ int main() {
 
   // manual type specification
   std::cout << "---\n";
-  std::cout << db::Database{
+  const auto inclusion_exclusion = db::Database{
     db::Record{ "a", true, "b", "included" },
     db::Record{ "a", false, "b", "excluded" },
-  }.filter(db::get<bool>("a"));
-  std::cout << db::Database{
-    db::Record{ "a", true, "b", "included" },
-    db::Record{ "a", false, "b", "excluded" },
-  }.filter(db::any_t<bool>);
+  };
+  std::cout << inclusion_exclusion.filter(db::get<bool>("a"));
+  std::cout << inclusion_exclusion.filter(db::any_t<bool>);
+  std::cout << inclusion_exclusion.filter(not db::any_t<bool>);
 
   // type inference
   std::cout << "---\n";
@@ -44,4 +43,13 @@ int main() {
     db::Record{ "x", 1.f, "to_infer", 1, "inferred", "int * float => int" },
     db::Record{ "x", 1, "to_infer", 1.0f, "inferred", "int * float => float" },
   }.filter( db::any_t<int> * db::any_t<float> == db::get("to_infer") );
+
+  // compare two any's
+  std::cout << "---\n";
+  std::cout << db::Database{
+    db::Record{ "a", 1, "b", 1, "should be found", "no" },
+    db::Record{ "a", 1, "b", 0, "should be found", "yes" },
+    db::Record{ "a", 0, "b", 1, "should be found", "yes" },
+    db::Record{ "a", 0, "b", 0, "should be found", "no" },
+  }.filter( db::any < db::any_t<int> );
 }

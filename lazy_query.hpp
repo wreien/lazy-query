@@ -210,19 +210,19 @@ namespace db::detail {
 #define DB_DETAIL_PROXY_ARITHOP_DECL(op)                                       \
   template <typename U, std::enable_if_t<not is_proxy_v<U>, int> = 0>          \
   friend auto operator op(Proxy left, U&& right) {                             \
-    return make_proxy<T>(*left.r, left.compare, [&left, right](auto&& x) {     \
+    return make_proxy<T>(*left.r, left.compare, [left, right](auto&& x) {      \
       return left.proj(x) op right;                                            \
     });                                                                        \
   }                                                                            \
   template <typename U, std::enable_if_t<not is_proxy_v<U>, int> = 0>          \
   friend auto operator op(U&& left, Proxy right) {                             \
-    return make_proxy<T>(*right.r, right.compare, [left, &right](auto&& x) {   \
+    return make_proxy<T>(*right.r, right.compare, [left, right](auto&& x) {    \
       return left op right.proj(x);                                            \
     });                                                                        \
   }                                                                            \
   template <typename U, typename C, typename P>                                \
   friend auto operator op(Proxy left, Proxy<U, C, P> right) {                  \
-    return make_proxy<T>(*left.r, left.compare, [&left, right](auto&& x) {     \
+    return make_proxy<T>(*left.r, left.compare, [left, right](auto&& x) {      \
       return left.proj(x) op right;                                            \
     });                                                                        \
   }
@@ -253,6 +253,8 @@ namespace db::detail {
       return compare(*r, [this](auto&& v) { return proj(v); });
     }
 
+    // binary
+    // relations
     DB_DETAIL_PROXY_RELOP_DECL(<)
     DB_DETAIL_PROXY_RELOP_DECL(>)
     DB_DETAIL_PROXY_RELOP_DECL(<=)
@@ -271,6 +273,18 @@ namespace db::detail {
     DB_DETAIL_PROXY_ARITHOP_DECL(&)
     DB_DETAIL_PROXY_ARITHOP_DECL(|)
     DB_DETAIL_PROXY_ARITHOP_DECL(^)
+
+    // unary
+    // (operator! is covered by operator bool)
+    auto operator-() const {
+      return make_proxy<T>(*r, compare, [proj=proj](auto&& x) { return -proj(x); });
+    }
+    auto operator+() const {
+      return make_proxy<T>(*r, compare, [proj=proj](auto&& x) { return +proj(x); });
+    }
+    auto operator~() const {
+      return make_proxy<T>(*r, compare, [proj=proj](auto&& x) { return ~proj(x); });
+    }
   };
 
 #undef DB_DETAIL_ANY_PROXY_RELOP_DECL
@@ -459,15 +473,15 @@ namespace db::detail {
       : expr{ std::forward<E>(expr) }, op{ std::move(op) }
     {};
 
-    std::optional<value_type> operator()(const Record& r) const {
+    auto operator()(const Record& r) const {
       if constexpr (is_value_v<Expr>) {
         if (auto expr_ptr = expr.template get<value_type>(r))
-          return op(*std::move(expr_ptr));
+          return std::optional{ op(*std::move(expr_ptr)) };
       } else {
         if (auto e = expr(r))
-          return op(*std::move(e));
+          return std::optional{ op(*std::move(e)) };
       }
-      return std::nullopt;
+      return decltype((*this)(r)){};
     }
 
   private:
@@ -491,14 +505,17 @@ namespace db::detail {
   // operator overloads for expression operators (relies on ADL)
 
   // more macro goodness
+  // ignore proxies in unary ops so that they can properly use their own calls
+#define DB_DETAIL_UNARYOP_DECL(op, func)                                       \
+  template <typename Expr, std::enable_if_t<not is_proxy_v<Expr>, int> = 0>    \
+  auto operator op(Expr &&expr) {                                              \
+    return UnaryOp(std::forward<Expr>(expr), func{});                          \
+  }
+  // don't need to do this for binary ops, they'll be properly found when needed
 #define DB_DETAIL_BINOP_DECL(op, func)                                         \
   template <typename Lhs, typename Rhs>                                        \
-  auto operator op(Lhs &&lhs, Rhs &&rhs) {                                     \
+  auto operator op(Lhs&& lhs, Rhs&& rhs) {                                     \
     return BinOp(std::forward<Lhs>(lhs), std::forward<Rhs>(rhs), func{});      \
-  }
-#define DB_DETAIL_UNARYOP_DECL(op, func)                                       \
-  template <typename Expr> auto operator op(Expr &&expr) {                     \
-    return UnaryOp(std::forward<Expr>(expr), func{});                          \
   }
 
   // no standard function object for unary +, so provide it
