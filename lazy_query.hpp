@@ -21,7 +21,7 @@ namespace db {
   class Record {
     // helper to construct from set of parameters
     template <std::size_t... I, typename... Args>
-    void set_from_tuple(std::index_sequence<I...>, std::tuple<Args...> &&args) {
+    void set_from_tuple(std::index_sequence<I...>, std::tuple<Args...>&& args) {
       static_assert(
           (... &&
            std::is_convertible_v<decltype(std::get<I * 2>(std::move(args))),
@@ -172,7 +172,7 @@ namespace db::detail {
   >> : std::true_type {};
   template <typename T>
   inline constexpr bool is_untyped_v = is_untyped<T>::value;
-}  // namespace db
+}  // namespace db::detail
 
 // abstract proxy type
 namespace db::detail {
@@ -233,7 +233,7 @@ namespace db::detail {
 
   // used to combine both expicit types and type deduction
   template <typename T, typename Comparison, typename Projection>
-  auto make_proxy(const Record &r, Comparison &&c, Projection &&p) {
+  auto make_proxy(const Record &r, Comparison&& c, Projection&& p) {
     return Proxy<T, std::decay_t<Comparison>, std::decay_t<Projection>>{
         r, std::forward<Comparison>(c), std::forward<Projection>(p)};
   }
@@ -289,7 +289,7 @@ namespace db::detail {
 
 #undef DB_DETAIL_ANY_PROXY_RELOP_DECL
 #undef DB_DETAIL_ANY_PROXY_ARITHOP_DECL
-}
+} // namespace db::detail
 
 // object and expression wrapper generators
 namespace db::detail {
@@ -489,8 +489,6 @@ namespace db::detail {
     Op op;
   };
 
-  // TODO: binary and unary arithmetic expressions
-
   // use CTAD to automatically wrap non-expressions into Constants
   template <typename Expr>
   using wrapped = std::conditional<is_valid_v<Expr>, Expr, Constant<Expr>>;
@@ -508,7 +506,7 @@ namespace db::detail {
   // ignore proxies in unary ops so that they can properly use their own calls
 #define DB_DETAIL_UNARYOP_DECL(op, func)                                       \
   template <typename Expr, std::enable_if_t<not is_proxy_v<Expr>, int> = 0>    \
-  auto operator op(Expr &&expr) {                                              \
+  auto operator op(Expr&& expr) {                                              \
     return UnaryOp(std::forward<Expr>(expr), func{});                          \
   }
   // don't need to do this for binary ops, they'll be properly found when needed
