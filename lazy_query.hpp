@@ -22,11 +22,9 @@ namespace db {
     // helper to construct from set of parameters
     template <std::size_t... I, typename... Args>
     void set_from_tuple(std::index_sequence<I...>, std::tuple<Args...>&& args) {
-      static_assert(
-          (... &&
-           std::is_convertible_v<decltype(std::get<I * 2>(std::move(args))),
-                                 std::string>),
-          "keys must all be convertible to std::string");
+      static_assert(std::conjunction_v<std::is_convertible<
+                      decltype(std::get<I * 2>(std::move(args))), std::string>...>,
+                    "keys must all be convertible to std::string");
 
       (set(std::get<I*2>(std::move(args)), std::get<I*2 + 1>(std::move(args))), ...);
     }
@@ -150,12 +148,19 @@ namespace db::detail {
   template <typename T>
   inline constexpr bool is_operation_v = is_operation<T>::value;
 
-  // a value
+  // a value wrapper
   struct ValueBase {};
   template <typename T>
   struct is_value : std::is_base_of<ValueBase, std::decay_t<T>> {};
   template <typename T>
   inline constexpr bool is_value_v = is_value<T>::value;
+
+  // a proxy value
+  struct ProxyBase {};
+  template <typename T>
+  struct is_proxy : std::is_base_of<ProxyBase, std::decay_t<T>> {};
+  template <typename T>
+  inline constexpr bool is_proxy_v = is_proxy<T>::value;
 
   // any valid expression category
   template <typename T>
@@ -176,12 +181,6 @@ namespace db::detail {
 
 // abstract proxy type
 namespace db::detail {
-  struct ProxyBase {};
-  template <typename T>
-  struct is_proxy : std::is_base_of<ProxyBase, std::decay_t<T>> {};
-  template <typename T>
-  inline constexpr bool is_proxy_v = is_proxy<T>::value;
-
   // ugly macro madness time
   // but it really simplifies defining all the operator overloads
 
@@ -244,6 +243,8 @@ namespace db::detail {
     Proxy(const Record& r, C&& compare, P&& proj)
       : r(&r), compare{ std::forward<C>(compare) }, proj{ std::forward<P>(proj) }
     {}
+
+    using value_type = decltype(std::declval<Projection>()(std::declval<T>()));
 
     const Record* r;
     Comparison compare;
@@ -353,6 +354,61 @@ namespace db::detail {
       };
       auto projection = [](auto&& x) { return x; };
       return std::make_optional(make_proxy<T>(r, compare, projection));
+    }
+  };
+
+  template <typename Fn, typename... Args>
+  struct Invoker : private ValueBase {
+    template <typename T>
+    using reified_t = std::conditional_t<is_valid_v<T>, typename T::value_type, T>;
+    using value_type = std::invoke_result_t<Fn, reified_t<Args>...>;
+
+    static_assert(not std::disjunction_v<is_proxy<Args>...>,
+                  "cannot yet invoke proxy arguments");
+
+    Invoker(Fn fn, std::tuple<Args...>&& args)
+      : fn(std::move(fn)), args(std::move(args))
+    {}
+
+    Fn fn;
+    std::tuple<Args...> args;
+
+    template <typename T>
+    struct identity { using type = T; };
+
+    template <typename T, std::size_t... I>
+    auto get_impl(const Record& r, identity<T>, std::index_sequence<I...>) const {
+      const auto extract = [this, &r](auto index) -> decltype(auto) {
+        constexpr auto x = decltype(index)::value;
+        auto&& elem = std::get<x>(args);
+        using elem_t = std::decay_t<decltype(elem)>;
+
+        if constexpr (is_value_v<elem_t>) {
+          if (auto ptr = elem.template get<typename elem_t::value_type>(r))
+            return std::optional{ *std::move(ptr) };
+          else
+            return decltype(std::optional{ *std::move(ptr) }){};
+        } else if constexpr (is_operation_v<elem_t>) {
+          if (auto result = elem(r))
+            return std::optional{ *std::move(result) };
+          else
+            return decltype(std::optional{ *std::move(result) }){};
+        } else {
+          return std::optional{ elem };
+        }
+      };
+
+      auto tuple = std::tuple{ extract(std::integral_constant<std::size_t, I>{}...) };
+      if ((... and std::get<I>(tuple))) {
+        return std::optional{ std::invoke(fn, *std::get<I>(tuple)...) };
+      } else {
+        return decltype(get_impl(r, identity<T>{}, std::index_sequence<I...>{})){};
+      }
+    }
+
+    template <typename T>
+    auto get(const Record& r) const {
+      return get_impl(r, identity<T>{}, std::make_index_sequence<sizeof...(Args)>{});
     }
   };
 } // namespace db::detail
@@ -581,6 +637,13 @@ namespace db {
   template <typename T>
   inline constexpr detail::Any<T> any_t{};
 
+  // call a function on query expressions
+  template <typename Fn, typename... Args>
+  auto invoke(Fn&& fn, Args&&... args) {
+    return detail::Invoker(
+      std::forward<Fn>(fn), std::make_tuple(std::forward<Args>(args)...));
+  }
+
   // main interface into expression tree
   // use `operator()` to execute the query
   // will only return boolean values
@@ -618,7 +681,7 @@ namespace db {
     template <typename First, typename... Rest,
               std::enable_if_t<std::is_constructible_v<Record, First>, int> = 0>
     Database(First&& first, Rest&&... rest) {
-      static_assert((... && std::is_constructible_v<Record, Rest>));
+      static_assert((... and std::is_constructible_v<Record, Rest>));
       records.reserve(sizeof...(Rest) + 1);
       records.emplace_back(std::forward<First>(first));
       (records.emplace_back(std::forward<Rest>(rest)), ...);

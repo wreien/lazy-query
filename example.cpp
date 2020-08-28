@@ -52,4 +52,12 @@ int main() {
     db::Record{ "a", 0, "b", 1, "should be found", "yes" },
     db::Record{ "a", 0, "b", 0, "should be found", "no" },
   }.filter( db::any < db::any_t<int> );
+
+  // call functions on database types
+  std::cout << "---\n";
+  std::cout << db::Database{
+    db::Record{ "string", "a"s },
+    db::Record{ "string", "ab"s },
+    db::Record{ "string", "abc"s },
+  }.filter( db::invoke(&std::string::size, db::get<std::string>("string")) == 3 );
 }

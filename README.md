@@ -69,6 +69,10 @@ Currently, the available functions are:
 - `db::any_t<type>`: a proxy value with given type.
   Determines if _any_ value in the record matching the provided type
   fulfills a comparison.
+- `db::invoke(func, args...)`: invoke `func` with given `args`, returning the result.
+  This is a late-binding call, and is only invoked at filter time.
+  Does not yet work with proxy types (e.g. `db::any`).
+  Currently all arguments must be fully typed.
 
 These can largely be combined with each other and compared using:
 
