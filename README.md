@@ -71,7 +71,6 @@ Currently, the available functions are:
   fulfills a comparison.
 - `db::invoke(func, args...)`: invoke `func` with given `args`, returning the result.
   This is a late-binding call, and is only invoked at filter time.
-  Does not yet work with proxy types (e.g. `db::any`).
   Currently all arguments must be fully typed.
 
 These can largely be combined with each other and compared using:

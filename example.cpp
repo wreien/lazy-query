@@ -1,4 +1,6 @@
 #include <iostream>
+#include <string>
+#include <functional>
 #include "lazy_query.hpp"
 
 int main() {
@@ -59,5 +61,18 @@ int main() {
     db::Record{ "string", "a"s },
     db::Record{ "string", "ab"s },
     db::Record{ "string", "abc"s },
-  }.filter( db::invoke(&std::string::size, db::get<std::string>("string")) == 3 );
+  }.filter( db::invoke(&std::string::size, db::get<std::string>("string")) == 3UL );
+
+  // call functions on proxy types
+  std::cout << "---\n";
+  std::cout << db::Database{
+    db::Record{ "x", 1, "w", 3, "included", "yes" },
+    db::Record{ "y", 2, "included", "yes" },
+    db::Record{ "z", 3, "included", "no" },
+  }.filter(
+    db::invoke(std::multiplies{},
+               -db::invoke(std::plus{}, db::any_t<int>, db::any_t<int>),
+               2)
+      == -8
+  );
 }

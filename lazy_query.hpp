@@ -186,41 +186,36 @@ namespace db::detail {
 
 #define DB_DETAIL_PROXY_RELOP_DECL(op)                                         \
   template <typename U, std::enable_if_t<not is_proxy_v<U>, int> = 0>          \
-  friend bool operator op(Proxy left, U&& right) {                             \
-    return left.compare(*left.r, [&](auto&& v) {                               \
-      return left.proj(v) op right;                                            \
-    });                                                                        \
+  friend bool operator op(const Proxy& left, U&& right) {                      \
+    return left.go([&](auto&& v) { return v op right; });                      \
   }                                                                            \
   template <typename U, std::enable_if_t<not is_proxy_v<U>, int> = 0>          \
-  friend bool operator op(U&& left, Proxy right) {                             \
-    return right.compare(*right.r, [&](auto&& v) {                             \
-      return left op right.proj(v);                                            \
-    });                                                                        \
+  friend bool operator op(U&& left, const Proxy& right) {                      \
+    return right.go([&](auto&& v) { return left op v; });                      \
   }                                                                            \
   template <typename U, typename C, typename P>                                \
-  friend bool operator op(Proxy left, Proxy<U, C, P> right) {                  \
-    return left.compare(*left.r, [&](auto&& l) {                               \
-      return right.compare(*right.r, [&](auto&& r) {                           \
-        return left.proj(l) op right.proj(r);                                  \
-      });                                                                      \
+  friend bool operator op(const Proxy& left, const Proxy<U, C, P>& right) {    \
+    return left.go([&](auto&& l) {                                             \
+      return right.go([&](auto&& r) { return l op r; });                       \
     });                                                                        \
   }
 
 #define DB_DETAIL_PROXY_ARITHOP_DECL(op)                                       \
   template <typename U, std::enable_if_t<not is_proxy_v<U>, int> = 0>          \
-  friend auto operator op(Proxy left, U&& right) {                             \
+  friend auto operator op(const Proxy& left, U&& right) {                      \
     return make_proxy<T>(*left.r, left.compare, [left, right](auto&& x) {      \
       return left.proj(x) op right;                                            \
     });                                                                        \
   }                                                                            \
   template <typename U, std::enable_if_t<not is_proxy_v<U>, int> = 0>          \
-  friend auto operator op(U&& left, Proxy right) {                             \
+  friend auto operator op(U&& left, const Proxy& right) {                      \
     return make_proxy<T>(*right.r, right.compare, [left, right](auto&& x) {    \
       return left op right.proj(x);                                            \
     });                                                                        \
   }                                                                            \
   template <typename U, typename C, typename P>                                \
-  friend auto operator op(Proxy left, Proxy<U, C, P> right) {                  \
+  friend auto operator op(const Proxy& left, const Proxy<U, C, P>& right) {    \
+    /* TODO: doesn't work when they're two different kinds of proxy */         \
     return make_proxy<T>(*left.r, left.compare, [left, right](auto&& x) {      \
       return left.proj(x) op right;                                            \
     });                                                                        \
@@ -237,6 +232,13 @@ namespace db::detail {
         r, std::forward<Comparison>(c), std::forward<Projection>(p)};
   }
 
+  template <typename T, typename Comparison>
+  auto make_proxy(const Record &r, Comparison&& c) {
+    auto identity = [](auto&& x) -> decltype(auto) {
+      return std::forward<decltype(x)>(x); };
+    return make_proxy<T>(r, std::forward<Comparison>(c), identity);
+  }
+
   template <typename T, typename Comparison, typename Projection>
   struct Proxy : private ProxyBase {
     template <typename C, typename P>
@@ -244,14 +246,29 @@ namespace db::detail {
       : r(&r), compare{ std::forward<C>(compare) }, proj{ std::forward<P>(proj) }
     {}
 
-    using value_type = decltype(std::declval<Projection>()(std::declval<T>()));
+    using value_type = std::decay_t<decltype(
+      std::declval<Projection>()(std::declval<T>()))>;
 
+    // pointer to the currently processed record
     const Record* r;
+
+    // function to perform the final filtering of this proxy type; of form
+    //   bool (const Record& r, function<bool(auto&& value)> callback);
+    // where `r` is `*this->r` and `value` is the contained value in the proxy
+    // the callback returns whether `value` compares true
     Comparison compare;
+
+    // project a proxy value into a new type; of form
+    //   U (T&& old_value);
     Projection proj;
 
-    explicit operator bool() const noexcept {
-      return compare(*r, [this](auto&& v) { return proj(v); });
+    template <typename F>
+    auto go(F&& f) const {
+      return compare(*r, [&](auto&& v) { return std::forward<F>(f)(proj(v)); });
+    }
+
+    explicit operator bool() const {
+      return compare(*r, proj);
     }
 
     // binary
@@ -299,7 +316,9 @@ namespace db::detail {
   struct Constant : private ValueBase {
     using value_type = T;
 
-    Constant(T&& data) : data{ std::move(data) } {}
+    template <typename U>
+    Constant(U&& data) : data{ std::forward<U>(data) } {}
+
     T data;
 
     template <typename U>
@@ -316,7 +335,7 @@ namespace db::detail {
   struct Key : private ValueBase {
     using value_type = Value;
 
-    Key(std::string&& key) : key{ std::move(key) } {}
+    Key(std::string key) : key{ std::move(key) } {}
     std::string key;
 
     template <typename T>
@@ -338,7 +357,7 @@ namespace db::detail {
     }
   };
 
-  // wildcard, value of /any/ key
+  // wildcard, value of /any/ key with given type
   template <typename Value = void>
   struct Any : private ValueBase {
     using value_type = Value;
@@ -346,69 +365,134 @@ namespace db::detail {
     // matches keys with the given type
     template <typename T>
     auto get(const Record& r) const {
-      auto compare = [](const Record& r_inner, auto&& op) {
-        const auto values = r_inner.values<T>();
+      auto compare = [](const Record& r, auto&& op) {
+        const auto values = r.values<T>();
         return std::any_of(values.begin(), values.end(), [&](auto&& v) {
           return op(v.second);
         });
       };
-      auto projection = [](auto&& x) { return x; };
-      return std::make_optional(make_proxy<T>(r, compare, projection));
+      return std::optional{ make_proxy<T>(r, compare) };
+    }
+  };
+
+  // wildcard, value of /all/ keys with given type
+  template <typename Value = void>
+  struct All : private ValueBase {
+    using value_type = Value;
+
+    // matches keys with the given type
+    template <typename T>
+    auto get(const Record& r) const {
+      auto compare = [](const Record& r, auto&& op) {
+        const auto values = r.values<T>();
+        return std::all_of(values.begin(), values.end(), [&](auto&& v) {
+          return op(v.second);
+        });
+      };
+      return std::optional{ make_proxy<T>(r, compare) };
     }
   };
 
   template <typename Fn, typename... Args>
   struct Invoker : private ValueBase {
+  private:
     template <typename T>
-    using reified_t = std::conditional_t<is_valid_v<T>, typename T::value_type, T>;
-    using value_type = std::invoke_result_t<Fn, reified_t<Args>...>;
+    struct identity { using type = T; };
 
-    static_assert(not std::disjunction_v<is_proxy<Args>...>,
-                  "cannot yet invoke proxy arguments");
+    template <typename T, typename = void>
+    struct reified { using type = T; };
+    template <typename T>
+    struct reified<T, std::enable_if_t<is_valid_v<T>>> {
+      using type = typename T::value_type;
+    };
+    template <typename T>
+    using reified_t = typename reified<T>::type;
+
+  public:
+    using value_type = std::invoke_result_t<Fn, reified_t<Args>...>;
 
     Invoker(Fn fn, std::tuple<Args...>&& args)
       : fn(std::move(fn)), args(std::move(args))
     {}
 
-    Fn fn;
-    std::tuple<Args...> args;
-
-    template <typename T>
-    struct identity { using type = T; };
-
-    template <typename T, std::size_t... I>
-    auto get_impl(const Record& r, identity<T>, std::index_sequence<I...>) const {
-      const auto extract = [this, &r](auto index) -> decltype(auto) {
-        constexpr auto x = decltype(index)::value;
-        auto&& elem = std::get<x>(args);
-        using elem_t = std::decay_t<decltype(elem)>;
-
-        if constexpr (is_value_v<elem_t>) {
-          if (auto ptr = elem.template get<typename elem_t::value_type>(r))
-            return std::optional{ *std::move(ptr) };
-          else
-            return decltype(std::optional{ *std::move(ptr) }){};
-        } else if constexpr (is_operation_v<elem_t>) {
-          if (auto result = elem(r))
-            return std::optional{ *std::move(result) };
-          else
-            return decltype(std::optional{ *std::move(result) }){};
-        } else {
-          return std::optional{ elem };
-        }
-      };
-
-      auto tuple = std::tuple{ extract(std::integral_constant<std::size_t, I>{}...) };
-      if ((... and std::get<I>(tuple))) {
-        return std::optional{ std::invoke(fn, *std::get<I>(tuple)...) };
-      } else {
-        return decltype(get_impl(r, identity<T>{}, std::index_sequence<I...>{})){};
-      }
-    }
-
     template <typename T>
     auto get(const Record& r) const {
       return get_impl(r, identity<T>{}, std::make_index_sequence<sizeof...(Args)>{});
+    }
+
+  private:
+    Fn fn;
+    std::tuple<Args...> args;
+
+    // extracts a `std::optional<T>` from the args tuple at given index
+    template <std::size_t I>
+    auto extract(const Record& r) const {
+      auto&& elem = std::get<I>(args);
+      using elem_t = std::decay_t<decltype(elem)>;
+
+      if constexpr (is_value_v<elem_t>) {
+        if (auto ptr = elem.template get<typename elem_t::value_type>(r))
+          return std::optional{ *std::move(ptr) };
+        else
+          return decltype(std::optional{ *std::move(ptr) }){};
+      } else if constexpr (is_operation_v<elem_t>) {
+        if (auto result = elem(r))
+          return std::optional{ *std::move(result) };
+        else
+          return decltype(std::optional{ *std::move(result) }){};
+      } else {
+        return std::optional{ elem };
+      }
+    }
+
+    template <typename T, std::size_t... I>
+    auto get_impl(const Record& r, identity<T>, std::index_sequence<I...> seq) const {
+      auto tuple = std::tuple{ extract<I>(r)... };
+      if ((... and static_cast<bool>(std::get<I>(tuple)))) {
+        if constexpr (std::disjunction_v<is_proxy<decltype(*std::get<I>(tuple))>...>) {
+          return std::optional{ wrap_proxy(r, std::move(tuple), identity<T>{}, seq) };
+        } else {
+          return std::optional{ std::invoke(fn, *std::get<I>(tuple)...) };
+        }
+      } else {
+        return decltype(get_impl(r, identity<T>{}, seq)){};
+      }
+    }
+
+    template <std::size_t I, std::size_t E, typename Tuple, typename Params, typename Op>
+    static bool wrap_proxy_impl(Tuple&& tuple, Params&& params, Op&& op) {
+      static_assert(std::is_rvalue_reference_v<decltype(tuple)>);
+      static_assert(std::is_rvalue_reference_v<decltype(params)>);
+      if constexpr (I == E) {
+        return op(std::forward<Params>(params));
+      } else {
+        if constexpr (is_proxy_v<decltype(*std::get<I>(tuple))>) {
+          return std::get<I>(tuple)->go([&](auto&& v) {
+            return wrap_proxy_impl<I+1, E>(
+              std::move(tuple),
+              std::tuple_cat(std::move(params), std::forward_as_tuple(v)),
+              std::forward<Op>(op));
+          });
+        } else {
+          return wrap_proxy_impl<I+1, E>(
+            std::move(tuple),
+            std::tuple_cat(std::move(params),
+                           std::forward_as_tuple(*std::get<I>(std::move(tuple)))),
+            std::forward<Op>(op));
+        }
+      }
+    }
+
+    template <typename T, typename Tuple, std::size_t... Is>
+    auto wrap_proxy(const Record& r, Tuple&& tuple, identity<T>,
+                    std::index_sequence<Is...>) const {
+      static_assert(std::is_rvalue_reference_v<decltype(tuple)>);
+      auto compare = [fn = fn, tuple = std::move(tuple)](const Record&, auto&& op) {
+        return wrap_proxy_impl<0, sizeof...(Is)>(
+          std::move(tuple), std::tuple{},
+          [&](auto&& params){ return op(std::apply(fn, std::move(params))); });
+      };
+      return make_proxy<T>(r, compare);
     }
   };
 } // namespace db::detail
@@ -559,15 +643,15 @@ namespace db::detail {
   // operator overloads for expression operators (relies on ADL)
 
   // more macro goodness
-  // ignore proxies in unary ops so that they can properly use their own calls
+  // ignore proxies in ops so that they can properly use their own calls
 #define DB_DETAIL_UNARYOP_DECL(op, func)                                       \
   template <typename Expr, std::enable_if_t<not is_proxy_v<Expr>, int> = 0>    \
   auto operator op(Expr&& expr) {                                              \
     return UnaryOp(std::forward<Expr>(expr), func{});                          \
   }
-  // don't need to do this for binary ops, they'll be properly found when needed
 #define DB_DETAIL_BINOP_DECL(op, func)                                         \
-  template <typename Lhs, typename Rhs>                                        \
+  template <typename Lhs, typename Rhs, std::enable_if_t<                      \
+              not (is_proxy_v<Lhs> or is_proxy_v<Rhs>), int> = 0>              \
   auto operator op(Lhs&& lhs, Rhs&& rhs) {                                     \
     return BinOp(std::forward<Lhs>(lhs), std::forward<Rhs>(rhs), func{});      \
   }
