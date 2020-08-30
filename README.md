@@ -63,12 +63,10 @@ Currently, the available functions are:
   If not, or the inferred type is wrong, you can provide it explicitly.
 - `db::has_key(key)`: a simple boolean operation,
   returns whether the given `key` exists in the record (with any value type).
-- `db::any`: a proxy value with purely inferred type information.
-  Determines if _any_ value in the record matching the inferred type
-  fulfils a comparison.
-- `db::any_t<type>`: a proxy value with given type.
-  Determines if _any_ value in the record matching the provided type
-  fulfills a comparison.
+- `db::any<[type]>()`: a proxy value, with possibly inferred type.
+  Determines if _any_ value in the record with given type fulfils a comparison.
+- `db::all<[type]>()`: a proxy value, with possibly inferred type.
+  Determines if _all_ values in the record with given type fulfil a comparison.
 - `db::invoke(func, args...)`: invoke `func` with given `args`, returning the result.
   This is a late-binding call, and is only invoked at filter time.
   Currently all arguments must be fully typed.

@@ -13,11 +13,11 @@ int main() {
     db::Record{ "yet"s, 1000, "another"s, "record"s },
   };
   std::cout << d.filter(
-    db::any <= 3 and (db::get("first"s) == 1 or db::get("now"s) == "we"s));
+    db::any() <= 3 and (db::get("first"s) == 1 or db::get("now"s) == "we"s));
 
   // chained builder-style
   std::cout << "---\n";
-  auto other = std::move(d).filter(db::any == 3).filter(db::has_key("first"s));
+  auto other = std::move(d).filter(db::any() == 3).filter(db::has_key("first"s));
   std::cout << other;
 
   // complex arithmetic
@@ -27,7 +27,7 @@ int main() {
     db::Record{ "a", 2, "b", 2, "c", 2 },
     db::Record{ "a", 3, "b", 2, "c", 1 },
     db::Record{ "a", 4, "b", 2, "c", 10 },
-  }.filter( db::any * 2 > 15 or 3 - -db::get<int>("c") < 2 * db::get("a") );
+  }.filter( db::any() * 2 > 15 or 3 - -db::get<int>("c") < 2 * db::get("a") );
 
   // manual type specification
   std::cout << "---\n";
@@ -36,15 +36,15 @@ int main() {
     db::Record{ "a", false, "b", "excluded" },
   };
   std::cout << inclusion_exclusion.filter(db::get<bool>("a"));
-  std::cout << inclusion_exclusion.filter(db::any_t<bool>);
-  std::cout << inclusion_exclusion.filter(not db::any_t<bool>);
+  std::cout << inclusion_exclusion.filter(db::any<bool>());
+  std::cout << inclusion_exclusion.filter(not db::any<bool>());
 
   // type inference
   std::cout << "---\n";
   std::cout << db::Database{
     db::Record{ "x", 1.f, "to_infer", 1, "inferred", "int * float => int" },
     db::Record{ "x", 1, "to_infer", 1.0f, "inferred", "int * float => float" },
-  }.filter( db::any_t<int> * db::any_t<float> == db::get("to_infer") );
+  }.filter( db::any<int>() * db::any<float>() == db::get("to_infer") );
 
   // compare two any's
   std::cout << "---\n";
@@ -53,7 +53,7 @@ int main() {
     db::Record{ "a", 1, "b", 0, "should be found", "yes" },
     db::Record{ "a", 0, "b", 1, "should be found", "yes" },
     db::Record{ "a", 0, "b", 0, "should be found", "no" },
-  }.filter( db::any < db::any_t<int> );
+  }.filter( db::any() < db::any<int>() );
 
   // call functions on database types
   std::cout << "---\n";
@@ -71,7 +71,7 @@ int main() {
     db::Record{ "z", 3, "included", "no" },
   }.filter(
     db::invoke(std::multiplies{},
-               -db::invoke(std::plus{}, db::any_t<int>, db::any_t<int>),
+               -db::invoke(std::plus{}, db::any<int>(), db::any<int>()),
                2)
       == -8
   );

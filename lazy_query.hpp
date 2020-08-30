@@ -305,8 +305,8 @@ namespace db::detail {
     }
   };
 
-#undef DB_DETAIL_ANY_PROXY_RELOP_DECL
-#undef DB_DETAIL_ANY_PROXY_ARITHOP_DECL
+#undef DB_DETAIL_PROXY_RELOP_DECL
+#undef DB_DETAIL_PROXY_ARITHOP_DECL
 } // namespace db::detail
 
 // object and expression wrapper generators
@@ -716,10 +716,13 @@ namespace db {
     return detail::HasKey(std::move(key));
   }
 
-  // represents any key from the record
-  inline constexpr detail::Any<> any{};
-  template <typename T>
-  inline constexpr detail::Any<T> any_t{};
+  // queries on this succeed when any key satisfies the comparison
+  template <typename T = void>
+  auto any() { return detail::Any<T>{}; }
+
+  // queries on this succeed when all keys satisfy the comparison
+  template <typename T = void>
+  auto all() { return detail::All<T>{}; }
 
   // call a function on query expressions
   template <typename Fn, typename... Args>
