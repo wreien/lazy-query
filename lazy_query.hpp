@@ -334,7 +334,7 @@ namespace db::detail {
   struct Key : private ValueBase {
     using value_type = Value;
 
-    Key(std::string key) : key{ std::move(key) } {}
+    Key(std::string&& key) : key{ std::move(key) } {}
     std::string key;
 
     template <typename T>
@@ -344,15 +344,21 @@ namespace db::detail {
   };
 
   // tests for the existance of a key
+  // if T is not `void`, only checks keys of given type
+  template <typename T = void>
   struct HasKey : private OpBase {
     using value_type = bool;
 
-    HasKey(std::string key) : key(std::move(key)) {}
+    HasKey(std::string&& key) : key(std::move(key)) {}
     std::string key;
 
     std::optional<value_type> operator()(const Record& r) const {
-      auto keys = r.keys();
-      return { std::find(keys.begin(), keys.end(), key) != keys.end() };
+      if constexpr (std::is_void_v<T>) {
+        auto keys = r.keys();
+        return { std::find(keys.begin(), keys.end(), key) != keys.end() };
+      } else {
+        return { r.get_ptr<T>(key) != nullptr };
+      }
     }
   };
 
@@ -783,8 +789,10 @@ namespace db {
   }
 
   // determines if a key exists
+  // if T is provided, only considers keys with given type
+  template <typename T = void>
   auto has_key(std::string key) {
-    return detail::HasKey(std::move(key));
+    return detail::HasKey<T>(std::move(key));
   }
 
   // queries on this succeed when any key satisfies the comparison

@@ -66,8 +66,10 @@ Currently, the available functions are:
 - `db::get<[type]>(key)`: this gets the value associated with `key`.
   The `type`, if left out, can often be inferred from context.
   If not, or if the inferred type is wrong, you can provide it explicitly.
-- `db::has_key(key)`: a simple boolean operation, which
-  returns whether the given `key` exists in the record (with any value type).
+- `db::has_key<[type]>(key)`: a simple boolean operation, which
+  returns whether the given `key` exists in the record.
+  If `type` is provided returns true only if the key has the given type,
+  otherwise returns that key exists with _any_ type.
 - `db::any<[type]>()`: a proxy value, with possibly inferred type.
   Determines if _any_ value in the record with given type fulfils a comparison.
 - `db::all<[type]>()`: a proxy value, with possibly inferred type.
