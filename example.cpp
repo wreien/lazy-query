@@ -37,7 +37,7 @@ int main() {
   };
   std::cout << inclusion_exclusion.filter(db::get<bool>("a"));
   std::cout << inclusion_exclusion.filter(db::any<bool>());
-  std::cout << inclusion_exclusion.filter(not db::any<bool>());
+  std::cout << "not " << inclusion_exclusion.filter(not db::any<bool>());
 
   // type inference
   std::cout << "---\n";
@@ -61,7 +61,7 @@ int main() {
     db::Record{ "string", "a"s },
     db::Record{ "string", "ab"s },
     db::Record{ "string", "abc"s },
-  }.filter( db::invoke(&std::string::size, db::get<std::string>("string")) == 3UL );
+  }.filter( db::invoke(&std::string::size, db::get("string")) == 3UL );
 
   // call functions on proxy types
   std::cout << "---\n";
@@ -70,9 +70,8 @@ int main() {
     db::Record{ "y", 2, "included", "yes" },
     db::Record{ "z", 3, "included", "no" },
   }.filter(
-    db::invoke(std::multiplies{},
-               -db::invoke(std::plus{}, db::any<int>(), db::any<int>()),
-               2)
-      == -8
+    db::invoke([x = 2](int val) { return val * x; },
+               1 + db::invoke(std::plus{}, db::any<int>(), db::any<int>()))
+      == 10
   );
 }

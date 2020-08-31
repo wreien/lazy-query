@@ -392,24 +392,96 @@ namespace db::detail {
       return std::optional{ make_proxy<T>(r, compare) };
     }
   };
+} // namespace db::detail
 
+// implementation support for db::invoke
+namespace db::detail {
+  // base case
+  template <typename Func, typename = void>
+  struct invoke_args { using args = void; };
+
+  // nonmember functions
+  template <typename Ret, typename... Args>
+  struct invoke_args<Ret(Args...)> { using args = std::tuple<Args...>; };
+  template <typename Ret, typename... Args>
+  struct invoke_args<Ret(Args..., ...)> { using args = std::tuple<Args...>; };
+  template <typename Ret, typename... Args>
+  struct invoke_args<Ret(Args...) noexcept> { using args = std::tuple<Args...>; };
+  template <typename Ret, typename... Args>
+  struct invoke_args<Ret(Args..., ...) noexcept> { using args = std::tuple<Args...>; };
+
+  // member objects
+  template <typename T, typename C>
+  struct invoke_args<T C::*> { using args = std::tuple<C>; };
+
+  // member functions
+#define DB_DETAIL_COMMA ,  // used to ignore clang -Wambiguous-ellipsis
+#define DB_DETAIL_GENERATE_4(var, cv, ref, noex) \
+  template <typename Ret, typename Cls, typename... Args> \
+  struct invoke_args<Ret (Cls::*) (Args... var) cv ref noex> \
+    { using args = std::tuple<Cls, Args...>; };
+#define DB_DETAIL_GENERATE_3(cv, ref, noex) \
+  DB_DETAIL_GENERATE_4(, cv, ref, noex) \
+  DB_DETAIL_GENERATE_4(DB_DETAIL_COMMA ..., cv, ref, noex)
+#define DB_DETAIL_GENERATE_2(ref, noex) \
+  DB_DETAIL_GENERATE_3(, ref, noex) \
+  DB_DETAIL_GENERATE_3(const, ref, noex) \
+  DB_DETAIL_GENERATE_3(volatile, ref, noex) \
+  DB_DETAIL_GENERATE_3(const volatile, ref, noex)
+#define DB_DETAIL_GENERATE_1(noex) \
+  DB_DETAIL_GENERATE_2(, noex) \
+  DB_DETAIL_GENERATE_2(&, noex) \
+  DB_DETAIL_GENERATE_2(&&, noex)
+#define DB_DETAIL_GENERATE \
+  DB_DETAIL_GENERATE_1() \
+  DB_DETAIL_GENERATE_1(noexcept)
+
+  DB_DETAIL_GENERATE;
+
+#undef DB_DETAIL_GENERATE
+#undef DB_DETAIL_GENERATE_1
+#undef DB_DETAIL_GENERATE_2
+#undef DB_DETAIL_GENERATE_3
+#undef DB_DETAIL_GENERATE_4
+#undef DB_DETAIL_COMMA
+
+  // objects with call operator
+  template <typename T>
+  struct invoke_args<T, std::void_t<decltype(&T::operator())>>
+    : invoke_args<decltype(&T::operator())> {};
+
+  // stores a lazy invocation
   template <typename Fn, typename... Args>
   struct Invoker : private ValueBase {
   private:
     template <typename T>
     struct identity { using type = T; };
 
-    template <typename T, typename = void>
+    // calculate the inner type of the given argument
+    template <typename T, std::size_t I, typename = void>
     struct reified { using type = T; };
-    template <typename T>
-    struct reified<T, std::enable_if_t<is_valid_v<T>>> {
+    template <typename T, std::size_t I>
+    struct reified<T, I, std::enable_if_t<is_valid_v<T> and not is_untyped_v<T>>> {
       using type = typename T::value_type;
     };
-    template <typename T>
-    using reified_t = typename reified<T>::type;
+    template <typename T, std::size_t I>
+    struct reified<T, I, std::enable_if_t<is_valid_v<T> and is_untyped_v<T>>> {
+      using args = typename invoke_args<Fn>::args;
+      static_assert(not std::is_void_v<args>,
+                    "cannot perform type inference on function arguments here");
+      static_assert(I < std::tuple_size_v<args>,
+                    "too many args for given function");
+      using type = std::tuple_element_t<I, args>;
+    };
+    template <typename T, std::size_t I>
+    using reified_t = typename reified<T, I>::type;
+
+    template <std::size_t... I>
+    static constexpr auto result_type(std::index_sequence<I...>)
+      -> std::invoke_result_t<Fn, reified_t<Args, I>...>;
 
   public:
-    using value_type = std::invoke_result_t<Fn, reified_t<Args>...>;
+    using value_type = decltype(Invoker::result_type(std::index_sequence_for<Args...>{}));
 
     Invoker(Fn fn, std::tuple<Args...>&& args)
       : fn(std::move(fn)), args(std::move(args))
@@ -431,7 +503,7 @@ namespace db::detail {
       using elem_t = std::decay_t<decltype(elem)>;
 
       if constexpr (is_value_v<elem_t>) {
-        if (auto ptr = elem.template get<typename elem_t::value_type>(r))
+        if (auto ptr = elem.template get<reified_t<elem_t, I>>(r))
           return std::optional{ *std::move(ptr) };
         else
           return decltype(std::optional{ *std::move(ptr) }){};

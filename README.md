@@ -69,7 +69,7 @@ Currently, the available functions are:
   Determines if _all_ values in the record with given type fulfil a comparison.
 - `db::invoke(func, args...)`: invoke `func` with given `args`, returning the result.
   This is a late-binding call, and is only invoked at filter time.
-  Currently all arguments must be fully typed.
+  Support for type inference is patchy as yet.
 
 These can largely be combined with each other and compared using:
 
