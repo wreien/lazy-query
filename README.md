@@ -12,11 +12,16 @@ In particular, don't assume there'll be any sort of API stability at this point.
 Requires any conforming C++17 compiler,
 no extensions or third-party libraries needed.
 Tested with GCC 10.1 and Clang 10.0.
-There is no build system included, set it up as needed for your system.
-For example:
 
-    $ clang++ -std=c++17 -Wall -Wextra expr_template.cpp -o expr_template
-    $ ./expr_template
+There is no build system included, set it up as needed for your system.
+The library itself is a single header, `lazy_query.hpp`;
+include it in your project and you're done.
+
+An example is provided as well.
+It may be compiled and run using something like the following:
+
+    $ clang++ -std=c++17 -Wall -Wextra example.cpp -o example
+    $ ./example
 
 I've noticed that the error messages when the DSL is misused
 are currently a little better with Clang than GCC,
@@ -60,8 +65,8 @@ Currently, the available functions are:
   create constant nodes in the AST automatically where required.
 - `db::get<[type]>(key)`: this gets the value associated with `key`.
   The `type`, if left out, can often be inferred from context.
-  If not, or the inferred type is wrong, you can provide it explicitly.
-- `db::has_key(key)`: a simple boolean operation,
+  If not, or if the inferred type is wrong, you can provide it explicitly.
+- `db::has_key(key)`: a simple boolean operation, which
   returns whether the given `key` exists in the record (with any value type).
 - `db::any<[type]>()`: a proxy value, with possibly inferred type.
   Determines if _any_ value in the record with given type fulfils a comparison.
@@ -70,8 +75,10 @@ Currently, the available functions are:
 - `db::invoke(func, args...)`: invoke `func` with given `args`, returning the result.
   This is a late-binding call, and is only invoked at filter time.
   Support for type inference is patchy as yet.
+  `func` can be any callable, as with `std::invoke`.
 
-These can largely be combined with each other and compared using:
+The expressions returned from these functions can be
+combined and compared using:
 
 - the comparison operators `<`, `>`, `<=`, `>=`, `==`, `!=`
 - the arithmetic operators `+`, `-`, `*`, `/` and `%`
@@ -84,3 +91,16 @@ This list may be expanded in time.
 
 The included `example.cpp` file demonstrates
 a number of the DSL's features.
+
+## Future Work
+
+In approximate order of likelihood...
+
+- More extractors and operations
+- Flesh out the database and record types
+- Better error messages
+- A comprehensive test suite
+- Allow mutating operations, or a `map` function
+- Generalise the DSL to arbitrary record designs
+- ...
+- An actually useful product
