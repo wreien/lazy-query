@@ -181,6 +181,24 @@ namespace db::detail {
 
 // abstract proxy type
 namespace db::detail {
+  // a proxy object to handle computed comparisons
+  template <typename T, typename Comparison, typename Projection>
+  struct Proxy;
+
+  // used to combine both expicit types and type deduction
+  template <typename T, typename Comparison, typename Projection>
+  auto make_proxy(const Record &r, Comparison&& c, Projection&& p) {
+    return Proxy<T, std::decay_t<Comparison>, std::decay_t<Projection>>{
+        r, std::forward<Comparison>(c), std::forward<Projection>(p)};
+  }
+
+  template <typename T, typename Comparison>
+  auto make_proxy(const Record &r, Comparison&& c) {
+    auto identity = [](auto&& x) -> decltype(auto) {
+      return std::forward<decltype(x)>(x); };
+    return make_proxy<T>(r, std::forward<Comparison>(c), identity);
+  }
+
   // ugly macro madness time
   // but it really simplifies defining all the operator overloads
 
@@ -215,28 +233,9 @@ namespace db::detail {
   }                                                                            \
   template <typename U, typename C, typename P>                                \
   friend auto operator op(const Proxy& left, const Proxy<U, C, P>& right) {    \
-    /* TODO: doesn't work when they're two different kinds of proxy */         \
     return make_proxy<T>(*left.r, left.compare, [left, right](auto&& x) {      \
       return left.proj(x) op right;                                            \
     });                                                                        \
-  }
-
-  // a proxy object to handle computed comparisons
-  template <typename T, typename Comparison, typename Projection>
-  struct Proxy;
-
-  // used to combine both expicit types and type deduction
-  template <typename T, typename Comparison, typename Projection>
-  auto make_proxy(const Record &r, Comparison&& c, Projection&& p) {
-    return Proxy<T, std::decay_t<Comparison>, std::decay_t<Projection>>{
-        r, std::forward<Comparison>(c), std::forward<Projection>(p)};
-  }
-
-  template <typename T, typename Comparison>
-  auto make_proxy(const Record &r, Comparison&& c) {
-    auto identity = [](auto&& x) -> decltype(auto) {
-      return std::forward<decltype(x)>(x); };
-    return make_proxy<T>(r, std::forward<Comparison>(c), identity);
   }
 
   template <typename T, typename Comparison, typename Projection>
